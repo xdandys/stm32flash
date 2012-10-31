@@ -356,7 +356,7 @@ char stm32_erase_memory(const stm32_t *stm, uint8_t spage, uint8_t pages) {
 char stm32_run_raw_code(const stm32_t *stm, uint32_t target_address, const uint8_t *code, uint32_t code_size)
 {
 	uint32_t stack_le = le_u32(0x20002000);
-	uint32_t target_address_le = le_u32(target_address);
+	uint32_t code_address_le = le_u32(target_address + 8);
 	uint32_t length = code_size + 8;
 	
 	uint8_t *mem = malloc(length);
@@ -364,7 +364,7 @@ char stm32_run_raw_code(const stm32_t *stm, uint32_t target_address, const uint8
 		return 0;
 	
 	memcpy(mem, &stack_le, sizeof(uint32_t));
-	memcpy(mem + 4, &target_address_le, sizeof(uint32_t));
+	memcpy(mem + 4, &code_address_le, sizeof(uint32_t));
 	memcpy(mem + 8, code, code_size);
 	
 	uint8_t *pos = mem;
