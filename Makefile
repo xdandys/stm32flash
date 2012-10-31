@@ -12,7 +12,6 @@ all:
 		serial_common.c \
 		serial_platform.c \
 		parsers/parsers.a \
-		stm32/stmreset_binary.c \
 		-Wall
 
 clean:

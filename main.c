@@ -2,6 +2,7 @@
   stm32flash - Open Source ST STM32 flash program for *nix
   Copyright (C) 2010 Geoffrey McRae <geoff@spacevs.com>
   Copyright (C) 2011 Steve Markgraf <steve@steve-m.de>
+  Copyright (C) 2012 Daniel Strnad <strnadda@gmail.com>
 
   This program is free software; you can redistribute it and/or
   modify it under the terms of the GNU General Public License
@@ -48,6 +49,7 @@ serial_baud_t	baudRate	= SERIAL_BAUD_57600;
 int		rd	 	= 0;
 int		wr		= 0;
 int		wu		= 0;
+int		eraseOnly	= 0;
 int		npages		= 0xFF;
 int             spage           = 0;
 char		verify		= 0;
@@ -183,7 +185,15 @@ int main(int argc, char* argv[]) {
 		fprintf(stdout,	"Done.\n");
 		ret = 0;
 		goto close;
-
+	} else if (eraseOnly) {
+		ret = 0;
+		fprintf(stdout, "Erasing flash\n");
+		if (!stm32_erase_memory(stm, spage, npages)) {
+			fprintf(stderr, "Failed to erase memory\n");
+			ret = 1;
+			goto close;
+		}
+		
 	} else if (wu) {
 		fprintf(stdout, "Write-unprotecting flash\n");
 		/* the device automatically performs a reset after the sending the ACK */
@@ -203,10 +213,12 @@ int main(int argc, char* argv[]) {
 			goto close;
 		}
 
+
 		if (!stm32_erase_memory(stm, spage, npages)) {
 			fprintf(stderr, "Failed to erase memory\n");
 			goto close;
 		}
+
 
 		addr = stm->dev->fl_start + (spage * stm->dev->fl_ps);
 		fprintf(stdout, "\x1B[s");
@@ -300,7 +312,7 @@ close:
 
 int parse_options(int argc, char *argv[]) {
 	int c;
-	while((c = getopt(argc, argv, "b:r:w:e:vn:g:fchus:")) != -1) {
+	while((c = getopt(argc, argv, "b:r:w:e:vn:g:fchuos:")) != -1) {
 		switch(c) {
 			case 'b':
 				baudRate = serial_get_baud(strtoul(optarg, NULL, 0));
@@ -336,6 +348,14 @@ int parse_options(int argc, char *argv[]) {
 					return 1;
 				}
 				break;
+			case 'o':
+				eraseOnly = 1;
+				if (rd || wr) {
+					fprintf(stderr, "ERROR: Invalid options, can't erase-only and read/write at the same time\n");
+					return 1;
+				}
+				break;				
+			
 			case 'v':
 				verify = 1;
 				break;
@@ -397,6 +417,7 @@ void show_help(char *name) {
 		"	-r filename	Read flash to file\n"
 		"	-w filename	Write flash to file\n"
 		"	-u		Disable the flash write-protection\n"
+		"	-o		Erase only\n"
 		"	-e n		Only erase n pages before writing the flash\n"
 		"	-v		Verify writes\n"
 		"	-n count	Retry failed writes up to count times (default 10)\n"

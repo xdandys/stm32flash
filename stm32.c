@@ -1,6 +1,7 @@
 /*
   stm32flash - Open Source ST STM32 flash program for *nix
   Copyright (C) 2010 Geoffrey McRae <geoff@spacevs.com>
+  Copyright (C) 2012 Daniel Strnad <strnadda@gmail.com>
 
   This program is free software; you can redistribute it and/or
   modify it under the terms of the GNU General Public License
@@ -20,6 +21,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "stm32.h"
 #include "utils.h"
@@ -44,18 +46,34 @@ struct stm32_cmd {
 	uint8_t ur;
 };
 
+
+static const uint8_t stm_reset_code[] = {
+	0x02, 0x49,				// ldr     r1, [pc, #8]    ; (<AIRCR_OFFSET>)
+	0x02, 0x4A,				// ldr     r2, [pc, #8]    ; (<AIRCR_RESET_VALUE>)
+	0x0A, 0x60,				// str     r2, [r1, #0]
+	0xff, 0xf7, 0xfe, 0xff,			// endless: bl endless
+	0x0c, 0xed, 0x00, 0xe0,			// .word 0xe000ed0c <AIRCR_OFFSET>
+	0x04, 0x00, 0xfa, 0x05			// .word 0x05fa0004 <AIRCR_RESET_VALUE>
+};
+
+static const uint32_t stm_reset_code_length = sizeof(stm_reset_code);
+
 /* device table */
 const stm32_dev_t devices[] = {
 	{0x412, "Low-density"       , 0x20000200, 0x20002800, 0x08000000, 0x08008000,  4, 1024, 0x1FFFF800, 0x1FFFF80F, 0x1FFFF000, 0x1FFFF800},
 	{0x410, "Medium-density"    , 0x20000200, 0x20005000, 0x08000000, 0x08020000,  4, 1024, 0x1FFFF800, 0x1FFFF80F, 0x1FFFF000, 0x1FFFF800},
-        {0x411, "STM32F2xx"         , 0x20002000, 0x20020000, 0x08000000, 0x08100000,  4, 16384, 0x1FFFC000, 0x1FFFC00F, 0x1FFF0000, 0x1FFF77DF},
-        {0x413, "STM32F4xx"         , 0x20002000, 0x20020000, 0x08000000, 0x08100000,  4, 16384, 0x1FFFC000, 0x1FFFC00F, 0x1FFF0000, 0x1FFF77DF},
+	{0x411, "STM32F2xx"         , 0x20002000, 0x20020000, 0x08000000, 0x08100000,  4, 16384, 0x1FFFC000, 0x1FFFC00F, 0x1FFF0000, 0x1FFF77DF},
+	{0x413, "STM32F4xx"         , 0x20002000, 0x20020000, 0x08000000, 0x08100000,  4, 16384, 0x1FFFC000, 0x1FFFC00F, 0x1FFF0000, 0x1FFF77DF},
 	{0x414, "High-density"      , 0x20000200, 0x20010000, 0x08000000, 0x08080000,  2, 2048, 0x1FFFF800, 0x1FFFF80F, 0x1FFFF000, 0x1FFFF800},
 	{0x416, "Medium-density ULP", 0x20000800, 0x20004000, 0x08000000, 0x08020000, 16,  256, 0x1FF80000, 0x1FF8000F, 0x1FF00000, 0x1FF01000},
 	{0x418, "Connectivity line" , 0x20001000, 0x20010000, 0x08000000, 0x08040000,  2, 2048, 0x1FFFF800, 0x1FFFF80F, 0x1FFFB000, 0x1FFFF800},
 	{0x420, "Medium-density VL" , 0x20000200, 0x20002000, 0x08000000, 0x08020000,  4, 1024, 0x1FFFF800, 0x1FFFF80F, 0x1FFFF000, 0x1FFFF800},
 	{0x428, "High-density VL"   , 0x20000200, 0x20008000, 0x08000000, 0x08080000,  2, 2048, 0x1FFFF800, 0x1FFFF80F, 0x1FFFF000, 0x1FFFF800},
 	{0x430, "XL-density"        , 0x20000800, 0x20018000, 0x08000000, 0x08100000,  2, 2048, 0x1FFFF800, 0x1FFFF80F, 0x1FFFE000, 0x1FFFF800},
+        {0x440, "STM32F51x"         , 0x20001000, 0x20002000, 0x08000000, 0x08010000,  4, 1024, 0x1FFFF800, 0x1FFFF80B, 0x1FFFE000, 0x1FFFF800},
+	{0x422, "STM32F30x & F31x"  , 0x20002000, 0x20003000, 0x08000000, 0x08040000,  2, 2048, 0x1FFFF800, 0x1FFFF80F, 0x1FFFE000, 0x1FFFF800},
+	{0x432, "STM32F37x & F38x"  , 0x20002000, 0x20003000, 0x08000000, 0x08040000,  2, 2048, 0x1FFFF800, 0x1FFFF80F, 0x1FFFE000, 0x1FFFF800},
+	
 	{0x0}
 };
 
@@ -65,9 +83,6 @@ void    stm32_send_byte(const stm32_t *stm, uint8_t byte);
 uint8_t stm32_read_byte(const stm32_t *stm);
 char    stm32_send_command(const stm32_t *stm, const uint8_t cmd);
 
-/* stm32 programs */
-extern unsigned int	stmreset_length;
-extern unsigned char	stmreset_binary[];
 
 uint8_t stm32_gen_cs(const uint32_t v) {
 	return  ((v & 0xFF000000) >> 24) ^
@@ -221,7 +236,7 @@ char stm32_read_memory(const stm32_t *stm, uint32_t address, uint8_t data[], uns
 	return 1;
 }
 
-char stm32_write_memory(const stm32_t *stm, uint32_t address, uint8_t data[], unsigned int len) {
+char stm32_write_memory(const stm32_t *stm, uint32_t address, const uint8_t data[], unsigned int len) {
 	uint8_t cs;
 	unsigned int i;
 	int c, extra;
@@ -268,6 +283,9 @@ char stm32_wunprot_memory(const stm32_t *stm) {
 }
 
 char stm32_erase_memory(const stm32_t *stm, uint8_t spage, uint8_t pages) {
+	if (!pages)
+		return 1;
+	
 	if (!stm32_send_command(stm, stm->cmd->er)) {
 		fprintf(stderr, "Can't initiate chip erase!\n");
 		return 0;
@@ -335,6 +353,39 @@ char stm32_erase_memory(const stm32_t *stm, uint8_t spage, uint8_t pages) {
 	}
 }
 
+char stm32_run_raw_code(const stm32_t *stm, uint32_t target_address, const uint8_t *code, uint32_t code_size)
+{
+	uint32_t stack_le = le_u32(0x20002000);
+	uint32_t target_address_le = le_u32(target_address);
+	uint32_t length = code_size + 8;
+	
+	uint8_t *mem = malloc(length);
+	if (!mem)
+		return 0;
+	
+	memcpy(mem, &stack_le, sizeof(uint32_t));
+	memcpy(mem + 4, &target_address_le, sizeof(uint32_t));
+	memcpy(mem + 8, code, code_size);
+	
+	uint8_t *pos = mem;
+	uint32_t address = target_address;
+	while(length > 0) {
+		
+		uint32_t w = length > 256 ? 256 : length;
+		if (!stm32_write_memory(stm, address, pos, w)) {
+			free(mem);
+			return 0;
+		}
+		
+		address += w;
+		pos += w;
+		length -=w;
+	}
+	
+	free(mem);
+	return stm32_go(stm, target_address);
+}
+
 char stm32_go(const stm32_t *stm, uint32_t address) {
 	uint8_t cs;
 
@@ -349,25 +400,8 @@ char stm32_go(const stm32_t *stm, uint32_t address) {
 }
 
 char stm32_reset_device(const stm32_t *stm) {
-	/*
-		since the bootloader does not have a reset command, we
-		upload the stmreset program into ram and run it, which
-		resets the device for us
-	*/
-
-	uint32_t length		= stmreset_length;
-	unsigned char* pos	= stmreset_binary;
-	uint32_t address	= stm->dev->ram_start;
-	while(length > 0) {
-		uint32_t w = length > 256 ? 256 : length;
-		if (!stm32_write_memory(stm, address, pos, w))
-			return 0;
-
-		address	+= w;
-		pos	+= w;
-		length	-= w;
-	}
-
-	return stm32_go(stm, stm->dev->ram_start);
+	uint32_t target_address = stm->dev->ram_start;
+	
+	return stm32_run_raw_code(stm, target_address, stm_reset_code, stm_reset_code_length);
 }
 

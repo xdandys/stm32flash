@@ -1,6 +1,7 @@
 /*
   stm32flash - Open Source ST STM32 flash program for *nix
   Copyright (C) 2010 Geoffrey McRae <geoff@spacevs.com>
+  Copyright (C) 2012 Daniel Strnad <strnadda@gmail.com>
 
   This program is free software; you can redistribute it and/or
   modify it under the terms of the GNU General Public License
@@ -25,5 +26,6 @@
 
 char     cpu_le();
 uint32_t be_u32(const uint32_t v);
+uint32_t le_u32(const uint32_t v);
 
 #endif
